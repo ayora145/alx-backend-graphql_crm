@@ -1,36 +1,40 @@
 #!/usr/bin/env python3
-import requests
+from gql import gql, Client
+from gql.transport.requests import RequestsHTTPTransport
 import datetime
-import sys
 
 GRAPHQL_ENDPOINT = "http://localhost:8000/graphql"
 LOG_FILE = "/tmp/order_reminders_log.txt"
 
 def fetch_recent_orders():
     """Fetch orders with order_date within the last 7 days from GraphQL API."""
-    query = """
+    transport = RequestsHTTPTransport(url=GRAPHQL_ENDPOINT)
+    client = Client(transport=transport, fetch_schema_from_transport=True)
+    
+    query = gql("""
     query GetRecentOrders($startDate: DateTime!) {
-        orders(orderDate_Gte: $startDate) {
-            id
-            customer {
-                email
+        allOrders(orderDateGte: $startDate) {
+            edges {
+                node {
+                    id
+                    customer {
+                        email
+                    }
+                    orderDate
+                }
             }
-            orderDate
         }
     }
-    """
+    """)
+    
     one_week_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
-    response = requests.post(
-        GRAPHQL_ENDPOINT,
-        json={"query": query, "variables": {"startDate": one_week_ago}},
-    )
-
-    if response.status_code != 200:
-        print(f"GraphQL query failed with status {response.status_code}", file=sys.stderr)
-        return []
-
-    data = response.json()
-    return data.get("data", {}).get("orders", [])
+    result = client.execute(query, variable_values={"startDate": one_week_ago})
+    
+    orders = []
+    if result and "allOrders" in result and "edges" in result["allOrders"]:
+        orders = [edge["node"] for edge in result["allOrders"]["edges"]]
+    
+    return orders
 
 def log_order_reminders(orders):
     """Log each order’s ID and customer email with timestamp."""
